@@ -245,7 +245,9 @@ See [Plugin_development.md](docs/Plugin_development.md)
         - [x] Use RealtiveNum instead
       - [x] Option to place entry down if window is anchored to the bottom
     - [x] Dynamic window size on mathces update wrapping all in scroll if it's too big (abolished to be KISS)
-  - [ ] Completion for entry
+  - [ ] Better entry
+    - [ ] Completion for entry
+    - [x] Smooth input
   - [x] Design
     - [ ] Need to do something with text overflow.
       - Autoscroll on hover/selection
@@ -259,6 +261,7 @@ See [Plugin_development.md](docs/Plugin_development.md)
   - [ ] `?` should return some common help or default usage for plugin
   - [ ] `? <plugin>` should return some plugin usage (maybe based on it's config)
 - [x] Select first match by default as it is has default activate
+- [ ] Interface for plugin to request how to display it (for example to have small clipboard history images)
 - [ ] Add something like daemon mode to make launch faster. Instead of loading all libs and stuff every time we need just open/hide window using daemon
 - [ ] CI/CD
   - [ ] Security audit
