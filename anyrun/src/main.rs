@@ -4,12 +4,13 @@ mod plugins;
 mod ui;
 mod utils;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, os::unix::net::UnixStream, rc::Rc};
 
 use clap::Parser;
 use gmatch::GMatch;
 use gtk::{
-    gdk, gio,
+    gdk,
+    gio::{self, ApplicationFlags},
     glib::{self, clone},
     prelude::*,
 };
@@ -21,23 +22,93 @@ use plugins::*;
 use ui::*;
 use utils::*;
 
+fn send_command(command: &str) {
+    use std::io::Write;
+
+    let socket_path = socket_path();
+
+    if let Ok(mut stream) = UnixStream::connect(socket_path.clone()) {
+        debug!("Connected to socket: {}", socket_path.to_string_lossy());
+        debug!("Sending: {:?}", command);
+        stream.write_all(command.as_bytes()).unwrap();
+    } else {
+        error!("Failed to connect to socket. Is it running?");
+    }
+}
+
 fn main() -> Result<glib::ExitCode, glib::Error> {
     env_logger::init();
     gtk::init().expect("Failed to initialize GTK.");
 
-    let app = gtk::Application::new(Some(APP_ID), Default::default());
+    let app = gtk::Application::new(Some(APP_ID), ApplicationFlags::ALLOW_REPLACEMENT);
     app.register(gio::Cancellable::NONE)?;
-
-    if app.is_remote() {
-        return Ok(glib::ExitCode::SUCCESS);
-    }
-
-    let app_state = gio::Settings::new(APP_ID);
 
     let args = Args::parse();
     let config_dir = determine_config_dir(&args.config_dir);
     let (mut config, error_label) = load_config(&config_dir);
     config.merge_opt(args.config);
+
+    if app.is_remote() {
+        debug!("More than one instance running. We are remote");
+        if let Some(command) = args.command {
+            match command {
+                Command::Show => send_command("show"),
+                Command::Hide => send_command("hide"),
+                Command::Toggle => send_command("toggle"),
+                Command::Close => send_command("close"),
+            }
+        } else {
+            send_command("show")
+        }
+
+        return Ok(glib::ExitCode::SUCCESS);
+    }
+
+    debug!("Running as main instance");
+
+    let socket_path = socket_path();
+    if socket_path.exists() {
+        std::fs::remove_file(socket_path.clone()).unwrap();
+    }
+
+    let service = gio::SocketService::new();
+    service
+        .add_address(
+            &gio::UnixSocketAddress::new(&socket_path),
+            gio::SocketType::Stream,
+            gio::SocketProtocol::Default,
+            gio::Cancellable::NONE,
+        )
+        .expect("Failed to add address to the service");
+    debug!("Created socket at {}", socket_path.to_string_lossy());
+
+    let daemon = config.daemon;
+
+    service.connect_incoming(
+        clone!(@weak app => @default-return true, move |_, connection, _| {
+            debug!("NEW INCOME");
+            let command = read_from_stream(&connection.input_stream());
+            debug!("> {:?}", command);
+
+            let windows = app.windows();
+            let window = windows.first();
+            if let Some(window) = window {
+                match command.as_str() {
+                    "show" => window.show(),
+                    "hide" => if daemon {window.hide()} else {send_command("close")},
+                    "toggle" => if window.is_visible() {send_command("hide")} else {send_command("show")},
+                    "close" => window.close(),
+                    _ => error!("Unknown command received: {:?}", command),
+                }
+            }
+            true
+        }),
+    );
+
+    service.start();
+    debug!("Service started");
+
+    let app_state = gio::Settings::new(APP_ID);
 
     let display = gdk::Display::default().expect("No display found");
     let monitor = display
@@ -77,7 +148,7 @@ fn main() -> Result<glib::ExitCode, glib::Error> {
     app.connect_activate(
         clone!(@weak runtime_data => move |app| activate(app, runtime_data.clone())),
     );
-    let exit_code = app.run_with_args::<String>(&[]);
+    let exit_code = app.run();
 
     handle_post_run_action(runtime_data);
 
@@ -109,7 +180,7 @@ fn activate(app: &impl IsA<gtk::Application>, runtime_data: Rc<RefCell<RuntimeDa
 
     let window = setup_main_window(app, runtime_data.clone());
 
-    let entry = setup_entry(window.clone(), runtime_data.clone());
+    let entry = setup_entry(runtime_data.clone());
 
     if runtime_data.borrow().config.save_entry_state {
         let app_state = runtime_data.borrow().app_state.clone();
@@ -123,12 +194,7 @@ fn activate(app: &impl IsA<gtk::Application>, runtime_data: Rc<RefCell<RuntimeDa
         }),
     );
 
-    setup_activation(
-        entry.clone(),
-        main_list.clone(),
-        window.clone(),
-        runtime_data.clone(),
-    );
+    setup_activation(entry.clone(), main_list.clone(), runtime_data.clone());
 
     if runtime_data.borrow().config.show_results_immediately {
         refresh_matches(&entry.text(), runtime_data.clone());
@@ -141,5 +207,7 @@ fn activate(app: &impl IsA<gtk::Application>, runtime_data: Rc<RefCell<RuntimeDa
         main_list.clone(),
     );
 
-    window.present();
+    if !runtime_data.borrow().config.daemon {
+        window.present();
+    }
 }
