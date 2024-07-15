@@ -6,6 +6,8 @@ A wayland native krunner-like runner, made with customizability in mind.
 
 *This repo was forked to have some more fresh dependencies and plugins, small and big fixes/refactors, etc*
 
+Currently work on my fork will be frozen due to working on [UniRun](https://github.com/bzglve/unirun). If you want Anyrun you can clone and build this, or some [early version](https://github.com/bzglve/anyrun/commit/e614fd1586b11791dfabaeefedc50a0a00d6197c) which is very close to the original, but with more fresh dependencies
+
 check out [fork comments](#fork-comments)
 
 and if you are interested in development/have some ideas/wanna share you opinion
