@@ -150,7 +150,7 @@ fn main() -> Result<glib::ExitCode, glib::Error> {
     );
     let exit_code = app.run();
 
-    handle_post_run_action(runtime_data);
+    handle_post_run_action(&mut runtime_data.borrow_mut().post_run_action);
 
     Ok(exit_code)
 }

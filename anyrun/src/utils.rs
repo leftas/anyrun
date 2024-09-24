@@ -20,14 +20,15 @@ fn serve_copy_requests(bytes: &[u8]) {
     .expect("Failed to serve copy bytes");
 }
 
-pub fn handle_post_run_action(runtime_data: Rc<RefCell<RuntimeData>>) {
-    if let PostRunAction::Copy(bytes) = &runtime_data.borrow().post_run_action {
+pub fn handle_post_run_action(action: &mut PostRunAction) {
+    if let PostRunAction::Copy(bytes) = action {
         match unsafe { unistd::fork() } {
             Ok(unistd::ForkResult::Parent { .. }) => {
                 info!("Child spawned to serve copy requests.");
             }
             Ok(unistd::ForkResult::Child) => {
                 serve_copy_requests(bytes);
+                *action = PostRunAction::None;
             }
             Err(why) => {
                 error!("Failed to fork for copy sharing: {}", why);

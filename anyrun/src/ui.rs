@@ -271,11 +271,11 @@ fn handle_selection_activation<F>(
             on_refresh(exclusive);
         }
         HandleResult::Copy(bytes) => {
-            runtime_data.borrow_mut().post_run_action = PostRunAction::Copy(bytes.into());
+            let mut action = PostRunAction::Copy(bytes.into());
             if runtime_data.borrow().config.daemon {
-                handle_post_run_action(runtime_data.clone());
-                runtime_data.borrow_mut().post_run_action = PostRunAction::None;
+                handle_post_run_action(&mut action);
             }
+            runtime_data.borrow_mut().post_run_action = action;
             send_command("hide");
         }
         HandleResult::Stdout(bytes) => {
