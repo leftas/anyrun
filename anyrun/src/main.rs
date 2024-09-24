@@ -164,6 +164,8 @@ fn activate(app: &impl IsA<gtk::Application>, runtime_data: Rc<RefCell<RuntimeDa
             .name(style_names::MAIN)
             .build(),
     );
+    
+    let list_eck = gtk::EventControllerKey::new();
 
     let list_store = runtime_data.clone().borrow().list_store.clone();
 
@@ -180,7 +182,10 @@ fn activate(app: &impl IsA<gtk::Application>, runtime_data: Rc<RefCell<RuntimeDa
 
     let window = setup_main_window(app, runtime_data.clone());
 
-    let entry = setup_entry(runtime_data.clone());
+    let (entry, entry_eck) = setup_entry(runtime_data.clone());
+    entry.set_key_capture_widget(Some(main_list.upcast_ref::<gtk::Widget>()));
+
+    connect_entry_with_window_key_press_events(entry.clone(), entry_eck, &main_list, list_eck);
 
     if runtime_data.borrow().config.save_entry_state {
         let app_state = runtime_data.borrow().app_state.clone();

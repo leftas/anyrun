@@ -2,9 +2,10 @@ use std::{cell::RefCell, io, rc::Rc, time::Duration};
 
 use anyrun_interface::{HandleResult, Match};
 use gtk::{
-    gdk::Key,
+    gdk::{Key, ModifierType},
     glib::{self, clone, SourceId},
     prelude::*,
+    EventControllerKey,
 };
 use gtk_layer_shell::LayerShell;
 use log::*;
@@ -43,9 +44,6 @@ pub fn setup_main_window(
     );
 
     setup_layer_shell(window.clone(), runtime_data.clone());
-
-    let window_eck = gtk::EventControllerKey::new();
-    connect_window_key_press_events(window.clone(), window_eck);
 
     window
 }
@@ -86,7 +84,9 @@ fn setup_layer_shell(window: Rc<impl GtkWindowExt>, runtime_data: Rc<RefCell<Run
     window.set_layer(config.layer.into());
 }
 
-pub fn setup_entry(runtime_data: Rc<RefCell<RuntimeData>>) -> Rc<gtk::SearchEntry> {
+pub fn setup_entry(
+    runtime_data: Rc<RefCell<RuntimeData>>,
+) -> (Rc<gtk::SearchEntry>, EventControllerKey) {
     let entry = Rc::new(
         gtk::SearchEntry::builder()
             .hexpand(true)
@@ -96,7 +96,6 @@ pub fn setup_entry(runtime_data: Rc<RefCell<RuntimeData>>) -> Rc<gtk::SearchEntr
     );
 
     let entry_eck = gtk::EventControllerKey::new();
-    connect_entry_key_press_events(entry.clone(), entry_eck);
 
     let debounce_timeout: Rc<RefCell<Option<SourceId>>> = Rc::new(RefCell::new(None));
     entry.connect_changed(clone!(@strong debounce_timeout => move |e| {
@@ -114,7 +113,7 @@ pub fn setup_entry(runtime_data: Rc<RefCell<RuntimeData>>) -> Rc<gtk::SearchEntr
         ));
     }));
 
-    entry
+    (entry, entry_eck)
 }
 
 pub fn setup_activation(
@@ -148,46 +147,96 @@ fn connect_key_press_events<F>(
     event_controller_key: gtk::EventControllerKey,
     handler: F,
 ) where
-    F: Fn(Key) -> glib::Propagation + 'static,
+    F: Fn(&EventControllerKey, Key, ModifierType) -> glib::Propagation + 'static,
 {
     widget.add_controller(event_controller_key.clone());
-    event_controller_key.connect_key_pressed(move |_, keyval, _, _| handler(keyval));
+    event_controller_key.connect_key_pressed(move |ctrl, keyval, _, mods| handler(ctrl, keyval, mods));
 }
 
-fn connect_window_key_press_events(
-    widget: Rc<impl WidgetExt>,
-    event_controller_key: gtk::EventControllerKey,
+pub fn connect_entry_with_window_key_press_events(
+    entry_widget: Rc<impl EditableExt + WidgetExt>,
+    entry_ec_key: gtk::EventControllerKey,
+    listview: &Rc<gtk::ListBox>,
+    listview_ec_key: gtk::EventControllerKey,
 ) {
-    connect_key_press_events(widget, event_controller_key, move |keyval| match keyval {
-        Key::Escape => {
-            send_command("hide");
-            glib::Propagation::Stop
-        }
-        _ => glib::Propagation::Proceed,
-    });
-}
-
-fn connect_entry_key_press_events(
-    widget: Rc<impl WidgetExt>,
-    event_controller_key: gtk::EventControllerKey,
-) {
+    let ent = entry_widget.clone();
+    let lv = listview.clone();
     connect_key_press_events(
-        widget.clone(),
-        event_controller_key,
-        move |keyval| match keyval {
+        lv.clone(),
+        listview_ec_key,
+        move |ctrl, keyval, mods| match keyval {
             Key::Escape => {
                 send_command("hide");
+                ent.delete_text(0, -1);
                 glib::Propagation::Stop
             }
-            Key::Down | Key::Up => {
-                widget.emit_move_focus(if keyval == Key::Down {
-                    gtk::DirectionType::TabForward
-                } else {
-                    gtk::DirectionType::TabBackward
-                });
+            Key::j | Key::J => {
+                if mods.contains(ModifierType::CONTROL_MASK) {
+                    lv.emit_move_cursor(gtk::MovementStep::DisplayLines, 1, false, false);
+                    return glib::Propagation::Stop;
+                }
+                ctrl.forward(ent.upcast_ref::<gtk::Widget>());
+                ent.grab_focus();
+                glib::Propagation::Stop
+            }
+            Key::k | Key::K  => {
+                if mods.contains(ModifierType::CONTROL_MASK) {
+                    lv.emit_move_cursor(gtk::MovementStep::DisplayLines, -1, false, false);
+                    return glib::Propagation::Stop;
+                }
+                ctrl.forward(ent.upcast_ref::<gtk::Widget>());
+                ent.grab_focus();
+                glib::Propagation::Stop
+            }
+            Key::Control_L | Key::Control_R | Key::Up | Key::Down | Key::Return => glib::Propagation::Proceed,
+            _ => {
+                ctrl.forward(ent.upcast_ref::<gtk::Widget>());
+                ent.grab_focus();
                 glib::Propagation::Proceed
             }
-            _ => glib::Propagation::Proceed,
+        },
+    );
+
+    let ent = entry_widget.clone();
+    let lv = listview.clone();
+    connect_key_press_events(
+        ent.clone(),
+        entry_ec_key,
+        move |ctrl, keyval, mods| match keyval {
+            Key::Escape => {
+                send_command("hide");
+                ent.delete_text(0, -1);
+                glib::Propagation::Stop
+            }
+            Key::Down | Key::J | Key::j => {
+                if (mods.contains(ModifierType::CONTROL_MASK)
+                    && (keyval == Key::J || keyval == Key::j))
+                    || keyval == Key::Down
+                {
+                    if let Some(row) = lv.selected_row() {
+                        row.grab_focus();
+                    }
+                    ctrl.forward(lv.upcast_ref::<gtk::Widget>());
+
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            }
+            Key::Up | Key::K | Key::k => {
+                if (mods.contains(ModifierType::CONTROL_MASK)
+                    && (keyval == Key::K || keyval == Key::k))
+                    || keyval == Key::Up
+                {
+                    if let Some(row) = lv.selected_row() {
+                        row.grab_focus();
+                    }
+                    ctrl.forward(lv.upcast_ref::<gtk::Widget>());
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            }
+            Key::Control_L | Key::Control_R => glib::Propagation::Proceed,
+            _ => glib::Propagation::Proceed ,
         },
     );
 }
@@ -282,5 +331,8 @@ pub fn configure_main_window(
     }
 
     window.set_child(Some(&main_vbox));
-    entry.grab_focus();
+    let entry_cpy = entry.clone();
+    window.connect_show(move |_| {
+        entry_cpy.grab_focus();
+    });
 }
