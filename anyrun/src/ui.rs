@@ -15,6 +15,7 @@ use crate::{
     gmatch::GMatch,
     plugins::refresh_matches,
     send_command,
+    handle_post_run_action
 };
 
 pub fn setup_main_window(
@@ -271,6 +272,10 @@ fn handle_selection_activation<F>(
         }
         HandleResult::Copy(bytes) => {
             runtime_data.borrow_mut().post_run_action = PostRunAction::Copy(bytes.into());
+            if runtime_data.borrow().config.daemon {
+                handle_post_run_action(runtime_data.clone());
+                runtime_data.borrow_mut().post_run_action = PostRunAction::None;
+            }
             send_command("hide");
         }
         HandleResult::Stdout(bytes) => {
