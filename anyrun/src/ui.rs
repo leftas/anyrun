@@ -13,9 +13,9 @@ use log::*;
 use crate::{
     config::{style_names, Edge, PostRunAction, RelativeNum, RuntimeData},
     gmatch::GMatch,
+    handle_post_run_action,
     plugins::refresh_matches,
     send_command,
-    handle_post_run_action
 };
 
 pub fn setup_main_window(
@@ -122,16 +122,19 @@ pub fn setup_activation(
     main_list: Rc<gtk::ListBox>,
     runtime_data: Rc<RefCell<RuntimeData>>,
 ) {
-    entry.connect_activate(clone!(@strong main_list, @weak runtime_data =>
-        move |e| {
-        if let Some(row) = main_list.selected_row() {
-            handle_selection_activation(
-                row.index().try_into().unwrap(),
-                runtime_data.clone(),
-                |_| refresh_matches(&e.text(), runtime_data.clone()),
-            )
-        }
-    }));
+    entry.connect_activate(
+        clone!(@strong main_list, @weak runtime_data, @strong entry =>
+            move |e| {
+            if let Some(row) = main_list.selected_row() {
+                handle_selection_activation(
+                    row.index().try_into().unwrap(),
+                    runtime_data.clone(),
+                    |_| refresh_matches(&e.text(), runtime_data.clone()),
+                );
+                entry.delete_text(0, -1);
+            }
+        }),
+    );
 
     main_list.connect_row_activated(clone!(@strong entry, @weak runtime_data =>
         move |_, row| {
@@ -139,7 +142,8 @@ pub fn setup_activation(
             row.index().try_into().unwrap(),
             runtime_data.clone(),
             |_| refresh_matches(&entry.text(), runtime_data.clone()),
-        )
+        );
+        entry.delete_text(0, -1);
     }));
 }
 
@@ -151,7 +155,8 @@ fn connect_key_press_events<F>(
     F: Fn(&EventControllerKey, Key, ModifierType) -> glib::Propagation + 'static,
 {
     widget.add_controller(event_controller_key.clone());
-    event_controller_key.connect_key_pressed(move |ctrl, keyval, _, mods| handler(ctrl, keyval, mods));
+    event_controller_key
+        .connect_key_pressed(move |ctrl, keyval, _, mods| handler(ctrl, keyval, mods));
 }
 
 pub fn connect_entry_with_window_key_press_events(
@@ -180,7 +185,7 @@ pub fn connect_entry_with_window_key_press_events(
                 ent.grab_focus();
                 glib::Propagation::Stop
             }
-            Key::k | Key::K  => {
+            Key::k | Key::K => {
                 if mods.contains(ModifierType::CONTROL_MASK) {
                     lv.emit_move_cursor(gtk::MovementStep::DisplayLines, -1, false, false);
                     return glib::Propagation::Stop;
@@ -189,7 +194,9 @@ pub fn connect_entry_with_window_key_press_events(
                 ent.grab_focus();
                 glib::Propagation::Stop
             }
-            Key::Control_L | Key::Control_R | Key::Up | Key::Down | Key::Return => glib::Propagation::Proceed,
+            Key::Control_L | Key::Control_R | Key::Up | Key::Down | Key::Return => {
+                glib::Propagation::Proceed
+            }
             _ => {
                 ctrl.forward(ent.upcast_ref::<gtk::Widget>());
                 ent.grab_focus();
@@ -237,7 +244,7 @@ pub fn connect_entry_with_window_key_press_events(
                 glib::Propagation::Proceed
             }
             Key::Control_L | Key::Control_R => glib::Propagation::Proceed,
-            _ => glib::Propagation::Proceed ,
+            _ => glib::Propagation::Proceed,
         },
     );
 }
@@ -271,12 +278,8 @@ fn handle_selection_activation<F>(
             on_refresh(exclusive);
         }
         HandleResult::Copy(bytes) => {
-            let mut action = PostRunAction::Copy(bytes.into());
-            if runtime_data.borrow().config.daemon {
-                handle_post_run_action(&mut action);
-            }
-            runtime_data.borrow_mut().post_run_action = action;
             send_command("hide");
+            runtime_data.borrow_mut().post_run_action = PostRunAction::Copy(bytes.into());
         }
         HandleResult::Stdout(bytes) => {
             if let Err(why) = io::Write::write_all(&mut io::stdout().lock(), &bytes) {
@@ -293,7 +296,7 @@ pub fn configure_main_window(
     entry: Rc<impl WidgetExt>,
     main_list: Rc<impl WidgetExt>,
 ) {
-    let runtime_data = runtime_data.borrow();
+    let rt_data = runtime_data.borrow_mut();
 
     let main_vbox = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -307,12 +310,12 @@ pub fn configure_main_window(
         .spacing(12)
         .build();
 
-    if !runtime_data.error_label.is_empty() {
+    if !rt_data.error_label.is_empty() {
         main_vbox.append(
             &gtk::Label::builder()
                 .label(format!(
                     r#"<span foreground="red">{}</span>"#,
-                    runtime_data.error_label
+                    rt_data.error_label
                 ))
                 .use_markup(true)
                 .build(),
@@ -327,7 +330,7 @@ pub fn configure_main_window(
 
     scroll_window.set_child(Some(&*main_list));
 
-    if runtime_data.config.bottom_entry {
+    if rt_data.config.bottom_entry {
         main_vbox.append(&scroll_window);
         main_vbox.append(&*entry);
     } else {
@@ -336,8 +339,10 @@ pub fn configure_main_window(
     }
 
     window.set_child(Some(&main_vbox));
-    let entry_cpy = entry.clone();
+    if rt_data.config.daemon {
+        window.connect_hide(clone!(@strong runtime_data => move |_| handle_post_run_action(&mut runtime_data.borrow_mut().post_run_action)));
+    }
     window.connect_show(move |_| {
-        entry_cpy.grab_focus();
+        entry.grab_focus();
     });
 }

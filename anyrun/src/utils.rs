@@ -13,11 +13,13 @@ use crate::{
 fn serve_copy_requests(bytes: &[u8]) {
     let mut opts = copy::Options::new();
     opts.foreground(true);
-    opts.copy(
+    let error = opts.copy(
         copy::Source::Bytes(bytes.to_vec().into_boxed_slice()),
         copy::MimeType::Autodetect,
-    )
-    .expect("Failed to serve copy bytes");
+    ).err();
+    if let Some(why) = error {
+        error!("Error serving copy requests: {}", why);
+    }
 }
 
 pub fn handle_post_run_action(action: &mut PostRunAction) {
@@ -27,13 +29,15 @@ pub fn handle_post_run_action(action: &mut PostRunAction) {
                 info!("Child spawned to serve copy requests.");
             }
             Ok(unistd::ForkResult::Child) => {
-                serve_copy_requests(bytes);
-                *action = PostRunAction::None;
+                serve_copy_requests(&bytes.clone());
+                // Child should exit after copying?
+                std::process::exit(0);
             }
             Err(why) => {
                 error!("Failed to fork for copy sharing: {}", why);
             }
         }
+        *action = PostRunAction::None;
     }
 }
 
