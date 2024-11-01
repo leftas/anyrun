@@ -2,7 +2,7 @@ use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
 
 use gtk::{gdk, gio, prelude::InputStreamExtManual};
 use log::*;
-use nix::unistd;
+use nix::{libc, unistd};
 use wl_clipboard_rs::copy;
 
 use crate::{
@@ -10,32 +10,41 @@ use crate::{
     SOCKET_BUF_SIZE,
 };
 
-fn serve_copy_requests(bytes: &[u8]) {
+fn serve_copy_requests(bytes: &[u8], fork: bool) {
     let mut opts = copy::Options::new();
-    opts.foreground(true);
-    let error = opts.copy(
-        copy::Source::Bytes(bytes.to_vec().into_boxed_slice()),
-        copy::MimeType::Autodetect,
-    ).err();
+    opts.foreground(fork);
+    let error = opts
+        .copy(
+            copy::Source::Bytes(bytes.to_vec().into_boxed_slice()),
+            copy::MimeType::Autodetect,
+        )
+        .err();
     if let Some(why) = error {
         error!("Error serving copy requests: {}", why);
     }
 }
 
-pub fn handle_post_run_action(action: &mut PostRunAction) {
+pub fn handle_post_run_action(action: &mut PostRunAction, fork: bool) {
     if let PostRunAction::Copy(bytes) = action {
-        match unsafe { unistd::fork() } {
-            Ok(unistd::ForkResult::Parent { .. }) => {
-                info!("Child spawned to serve copy requests.");
+        if fork {
+            match unsafe { unistd::fork() } {
+                Ok(unistd::ForkResult::Parent { .. }) => {
+                    info!("Child spawned to serve copy requests.");
+                }
+                Ok(unistd::ForkResult::Child) => {
+                    serve_copy_requests(&bytes, fork);
+                    // Child should exit after copying?
+                    unsafe {
+                        libc::_exit(0);
+                    }
+                }
+                Err(why) => {
+                    error!("Failed to fork for copy sharing: {}", why);
+                }
             }
-            Ok(unistd::ForkResult::Child) => {
-                serve_copy_requests(&bytes.clone());
-                // Child should exit after copying?
-                std::process::exit(0);
-            }
-            Err(why) => {
-                error!("Failed to fork for copy sharing: {}", why);
-            }
+        }
+        else {
+            serve_copy_requests(&bytes, fork);
         }
         *action = PostRunAction::None;
     }

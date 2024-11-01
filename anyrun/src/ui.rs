@@ -340,7 +340,8 @@ pub fn configure_main_window(
 
     window.set_child(Some(&main_vbox));
     if rt_data.config.daemon {
-        window.connect_hide(clone!(@strong runtime_data => move |_| handle_post_run_action(&mut runtime_data.borrow_mut().post_run_action)));
+        window.connect_hide(clone!(@strong runtime_data =>
+        move |_| handle_post_run_action(&mut runtime_data.borrow_mut().post_run_action, false)));
     }
     window.connect_show(move |_| {
         entry.grab_focus();
