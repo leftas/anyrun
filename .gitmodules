@@ -1,6 +1,6 @@
 [submodule "plugins/applications"]
 	path = plugins/applications
-	url = https://github.com/viktory683/plugin-applications.git
+	url = https://github.com/leftas/plugin-applications.git
 [submodule "plugins/dictionary"]
 	path = plugins/dictionary
 	url = https://github.com/anyrun-org/plugin-dictionary.git
